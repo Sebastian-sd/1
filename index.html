@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Móvil ➜ PC (Tiempo real)</title>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background:linear-gradient(180deg,#0b1220,#0a0f1a); color:var(--text); }
+    header { padding:16px 20px; display:flex; gap:12px; align-items:center; justify-content:space-between; border-bottom:1px solid #1f2937; position:sticky; top:0; backdrop-filter:saturate(1.2) blur(6px); background:#0b1220cc; }
+    h1 { font-size:clamp(18px,4vw,22px); margin:0; font-weight:700; letter-spacing:0.2px; }
+    .tag { font-size:12px; padding:6px 10px; border:1px solid #1f2937; border-radius:999px; color:var(--muted); }
+    main { max-width:880px; margin:0 auto; padding:18px 16px 28px; display:grid; gap:16px; }
+    .card { background:linear-gradient(180deg,#0e1628,#0b1220); border:1px solid #1f2937; border-radius:18px; box-shadow:0 10px 24px #00000050; }
+    .composer { padding:14px; display:grid; gap:10px; grid-template-columns:1fr auto; align-items:end; }
+    .row { display:flex; gap:8px; width:100%; }
+    input[type="text"], textarea { width:100%; resize:vertical; min-height:42px; padding:12px 14px; background:#0b1220; color:var(--text); border:1px solid #243041; border-radius:12px; outline:none; }
+    input::placeholder, textarea::placeholder { color:#64748b; }
+    button { appearance:none; padding:12px 16px; border-radius:12px; font-weight:700; border:1px solid #1e293b; background:linear-gradient(180deg,#16a34a,#22c55e); color:#06240f; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .feed { display:grid; gap:12px; padding:12px; }
+    .msg { border:1px solid #1f2937; border-radius:16px; padding:12px 14px; background:linear-gradient(180deg,#0c1425,#0b1220); display:grid; gap:6px; }
+    .meta { display:flex; gap:8px; font-size:12px; color:var(--muted); align-items:center; flex-wrap:wrap; }
+    .meta .dot{ width:4px; height:4px; background:#334155; border-radius:50%; display:inline-block; }
+    .pill { padding:4px 8px; background:#0b1220; border:1px solid #253041; border-radius:999px; font-size:11px; color:#9ca3af; }
+    .empty { text-align:center; color:#94a3b8; padding:24px 8px; font-size:14px; }
+    .footer { text-align:center; color:#6b7280; font-size:12px; padding:8px 0 16px; }
+    @media (max-width:560px){ .composer{ grid-template-columns:1fr; } button{ width:100%; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>App: envía desde el celular y se ve en la PC</h1>
+    <span class="tag" id="whoTag">—</span>
+  </header>
+  <main>
+    <section class="card composer">
+      <div class="row">
+        <input id="name" type="text" placeholder="Tu nombre (opcional)" />
+      </div>
+      <div class="row">
+        <textarea id="text" placeholder="Escribe un mensaje…"></textarea>
+        <button id="sendBtn">Enviar</button>
+      </div>
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <small class="muted">Consejo: abre esta misma página en tu PC y en tu celular para ver los mensajes en tiempo real.</small>
+        <span class="pill" id="statusPill">Desconectado</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="feed" id="feed">
+        <div class="empty">Aún no hay mensajes. ¡Escribe algo arriba!</div>
+      </div>
+    </section>
+
+    <div class="footer">Hecho con Firebase Realtime Database. 
+      <a href="https://firebase.google.com/" target="_blank" rel="noreferrer" style="color:#22c55e; text-decoration:none;">Documentación</a>
+    </div>
+  </main>
+
+  <!-- Firebase SDKs (modular). Puedes dejar esta versión o actualizarla si Firebase te lo sugiere. -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, push, onChildAdded, serverTimestamp, onDisconnect, goOffline, goOnline } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    // 1) Pega aquí tu configuración de Firebase
+    //    (Proyecto > Configuración > Tus apps > Web > SDK setup & config)
+   const firebaseConfig = {
+  apiKey: "AIzaSyC3w6KUZi0bKdSMP2f2M3ele8dLtCGpVLk",
+  authDomain: "parrillas-66b0e.firebaseapp.com",
+  databaseURL: "https://parrillas-66b0e-default-rtdb.firebaseio.com",
+  projectId: "parrillas-66b0e",
+  storageBucket: "parrillas-66b0e.firebasestorage.app",
+  messagingSenderId: "520361790818",
+  appId: "1:520361790818:web:36b65573eabde389c9f03b",
+  measurementId: "G-79700DWFFW"
+};
+
+    // 2) Inicializa Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // Utilidades
+    const $ = s => document.querySelector(s);
+    const feed = $('#feed');
+    const sendBtn = $('#sendBtn');
+    const textEl = $('#text');
+    const nameEl = $('#name');
+    const statusPill = $('#statusPill');
+    const whoTag = $('#whoTag');
+
+    // Identificador del dispositivo (simple)
+    const deviceId = (() => {
+      const existing = localStorage.getItem('deviceId');
+      if (existing) return existing;
+      const id = 'dev_' + Math.random().toString(36).slice(2,9);
+      localStorage.setItem('deviceId', id);
+      return id;
+    })();
+
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    whoTag.textContent = isMobile ? 'Celular' : 'PC';
+
+    function setStatus(txt){ statusPill.textContent = txt; }
+
+    // 3) Enviar mensaje
+    sendBtn.addEventListener('click', async () => {
+      const text = textEl.value.trim();
+      if (!text) return;
+      sendBtn.disabled = true;
+      try {
+        await push(ref(db, 'mensajes'), {
+          text,
+          name: nameEl.value.trim() || null,
+          device: isMobile ? 'Celular' : 'PC',
+          deviceId,
+          ts: Date.now()
+        });
+        textEl.value = '';
+      } catch (e) {
+        alert('Error al enviar: ' + (e?.message || e));
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+
+    // 4) Escuchar mensajes en tiempo real
+    onChildAdded(ref(db, 'mensajes'), (snap) => {
+      const m = snap.val();
+      addMessage(m);
+    });
+
+    function addMessage(m){
+      if (feed.querySelector('.empty')) feed.innerHTML = '';
+      const el = document.createElement('div');
+      el.className = 'msg';
+      const date = new Date(m.ts || Date.now());
+      const who = m.name ? m.name : (m.device || 'Dispositivo');
+      el.innerHTML = `
+        <div>${escapeHtml(m.text || '')}</div>
+        <div class="meta">
+          <span class="pill">${who}</span>
+          <span class="dot"></span>
+          <span>${date.toLocaleString()}</span>
+        </div>
+      `;
+      feed.prepend(el);
+    }
+
+    function escapeHtml(str){
+      return str.replace(/[&<>"]+/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+
+    // Estado de conexión básico
+    setStatus('Conectado');
+    window.addEventListener('offline', ()=> setStatus('Sin internet'));
+    window.addEventListener('online', ()=> setStatus('Conectado'));
+  </script>
+</body>
+</html>
